@@ -30,7 +30,7 @@ def get_player_info(uid, region):
     }
 
 
-@app.get("/Ag-Like")
+@app.get("/Storm-Like")
 def like_api():
     uid = request.args.get("uid", "").strip()
     region = (request.args.get("region") or request.args.get("server") or "IND").strip().upper()
