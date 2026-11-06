@@ -1,0 +1,111 @@
+from flask import Flask, request, jsonify
+import os
+import requests
+
+app = Flask(__name__)
+
+# Primary provider. Set INFO_API_KEY in Vercel/hosting environment.
+INFO_API = os.getenv('INFO_API_URL', 'https://api.gameskinbo.com/ff-info/get')
+# Paste your Games Kinbo API key here
+INFO_API_KEY = '2Euz12sCE4t8grslZ8BleMxe09IAggjbmpnOlFcpCgE'
+
+
+def get_player_info(uid: str, region: str):
+    params = {'uid': uid, 'region': region}
+    headers = {'x-api-key': INFO_API_KEY}
+
+    r = requests.get(INFO_API, params=params, headers=headers, timeout=20)
+    try:
+        data = r.json()
+    except Exception:
+        data = {'raw': r.text[:1000]}
+
+    if r.status_code >= 400:
+        raise RuntimeError(f'Info provider HTTP {r.status_code}: {data}')
+
+    # Games Kinbo response structure:
+    # AccountInfo -> AccountName, AccountLevel, AccountRegion, AccountLikes
+    account = data.get('AccountInfo') or {}
+    profile = data.get('AccountProfileInfo') or {}
+    guild = data.get('GuildInfo') or {}
+
+    name = account.get('AccountName')
+    out_uid = (data.get('SocialInfo') or {}).get('accountId') or uid
+    level = account.get('AccountLevel', 0)
+    out_region = account.get('AccountRegion') or region
+    likes = account.get('AccountLikes', 0)
+
+    if not name:
+        raise RuntimeError(f'Info provider returned no AccountName: {data}')
+
+    return {
+        'uid': str(out_uid),
+        'name': str(name),
+        'level': level,
+        'region': str(out_region).upper(),
+        'likes': int(likes) if str(likes).isdigit() else 0,
+        'guild_name': guild.get('GuildName'),
+        'guild_id': guild.get('GuildID'),
+    }
+
+
+@app.get('/')
+def home():
+    return jsonify({
+        'message': 'Fake Like API Running',
+        'owner': '@TheStorm07x',
+        'usage': '/Ag-Like?uid=13057940699&region=BD',
+        'regions': ['BD', 'IND'],
+    })
+
+
+@app.get('/info')
+def info():
+    uid = request.args.get('uid', '').strip()
+    region = (request.args.get('region') or 'BD').strip().upper()
+    if not uid:
+        return jsonify({'status': 0, 'error': 'UID required'}), 400
+    if region not in {'BD', 'IND'}:
+        return jsonify({'status': 0, 'error': 'Supported regions: BD, IND'}), 400
+    try:
+        p = get_player_info(uid, region)
+        return jsonify(p)
+    except Exception as e:
+        return jsonify({
+            'status': 0,
+            'error': 'Info provider unavailable',
+            'details': str(e),
+        }), 502
+
+
+@app.get('/Ag-Like')
+def like_api():
+    uid = request.args.get('uid', '').strip()
+    region = (request.args.get('region') or request.args.get('server') or 'BD').strip().upper()
+    if not uid:
+        return jsonify({'status': 0, 'error': 'UID required'}), 400
+    if region not in {'BD', 'IND'}:
+        return jsonify({'status': 0, 'error': 'Supported regions: BD, IND'}), 400
+
+    try:
+        p = get_player_info(uid, region)
+    except Exception as e:
+        return jsonify({'status': 0, 'error': 'Info provider unavailable', 'details': str(e)}), 502
+
+    # Demo only: this does NOT modify a Free Fire account.
+    likes_sent = 100
+    return jsonify({
+        'status': 1,
+        'PlayerNickname': p['name'],
+        'UID': p['uid'],
+        'Region': p['region'],
+        'Level': p['level'],
+        'LikesGivenByAPI': likes_sent,
+        'LikesbeforeCommand': p['likes'],
+        'LikesafterCommand': p['likes'] + likes_sent,
+        'note': 'Demo/simulated likes; no game account was modified.'
+    })
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', '8080')))
